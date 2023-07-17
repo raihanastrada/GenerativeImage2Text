@@ -62,7 +62,7 @@ def prepare_coco_test():
 
 def prepare_coco_indo_test():
     image_folder = 'aux_data/raw_data'
-    json_file = 'aux_data/raw_data/coco_karpathy_test_indo.json'
+    json_file = 'aux_data/raw_data/test_indo.json'
     infos = json.loads(read_to_buffer(json_file))
     # infos = [i for i in infos if i['split'] == 'test']
     # assert all(i['filepath'] == 'val2014' for i in infos)
