@@ -25,11 +25,13 @@ def get_imagenet_unique_nick_names():
         'n03710721': 'maillot bathing suit',
     }
     nick_names = [nick_name_overwrite[n] if n in nick_name_overwrite else
-          get_nick_name(noffset_to_synset(n)) for n in noffsets]
+                  get_nick_name(noffset_to_synset(n)) for n in noffsets]
     assert hash_sha1(nick_names) == '9c1dd12d7e8120820ffd44b75ebe8b78b659a4f4'
     assert len(set(nick_names)) == len(nick_names)
-    assert len(set(map(lambda n: n.replace(' ', ''), nick_names))) == len(nick_names)
+    assert len(set(map(lambda n: n.replace(' ', ''), nick_names))
+               ) == len(nick_names)
     return nick_names
+
 
 def generate_imagenet_unique_names():
     nick_names = get_imagenet_unique_nick_names()
@@ -43,10 +45,11 @@ def prepare_coco_test():
     infos = json.loads(read_to_buffer(json_file))['images']
     infos = [i for i in infos if i['split'] == 'test']
     assert all(i['filepath'] == 'val2014' for i in infos)
+
     def gen_rows():
         for i in tqdm(infos):
             payload = base64.b64encode(read_to_buffer(op.join(image_folder,
-                                                       i['filename'])))
+                                                              i['filename'])))
             yield i['cocoid'], payload
     tsv_writer(gen_rows(), 'data/coco_caption/test.img.tsv')
 
@@ -56,6 +59,27 @@ def prepare_coco_test():
             yield i['cocoid'], json_dump(caps)
     tsv_writer(gen_cap_rows(), 'data/coco_caption/test.caption.tsv')
 
+
+def prepare_coco_indo_test():
+    # image_folder = 'val2014'
+    json_file = 'coco_karpathy_test_indo.json'
+    infos = json.loads(read_to_buffer(json_file))
+    # infos = [i for i in infos if i['split'] == 'test']
+    # assert all(i['filepath'] == 'val2014' for i in infos)
+
+    def gen_rows():
+        for i in tqdm(infos):
+            payload = base64.b64encode(read_to_buffer(i['image']))
+            yield i['image_id'], payload
+    tsv_writer(gen_rows(), 'data/coco_caption/test.img.tsv')
+
+    def gen_cap_rows():
+        for i in tqdm(infos):
+            caps = [{'caption': j} for j in i['caption']]
+            yield i['image_id'], json_dump(caps)
+    tsv_writer(gen_cap_rows(), 'data/coco_caption/test.caption.tsv')
+
+
 if __name__ == '__main__':
     init_logging()
     kwargs = parse_general_args()
@@ -63,4 +87,3 @@ if __name__ == '__main__':
     function_name = kwargs['type']
     del kwargs['type']
     locals()[function_name](**kwargs)
-
