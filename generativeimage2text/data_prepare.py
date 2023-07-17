@@ -61,15 +61,16 @@ def prepare_coco_test():
 
 
 def prepare_coco_indo_test():
-    # image_folder = 'val2014'
-    json_file = 'coco_karpathy_test_indo.json'
+    image_folder = 'aux_data/raw_data'
+    json_file = 'aux_data/raw_data/coco_karpathy_test_indo.json'
     infos = json.loads(read_to_buffer(json_file))
     # infos = [i for i in infos if i['split'] == 'test']
     # assert all(i['filepath'] == 'val2014' for i in infos)
 
     def gen_rows():
         for i in tqdm(infos):
-            payload = base64.b64encode(read_to_buffer(i['image']))
+            payload = base64.b64encode(read_to_buffer(op.join(image_folder,
+                                                              i['image'])))
             yield i['image_id'], payload
     tsv_writer(gen_rows(), 'data/coco_caption/test.img.tsv')
 
