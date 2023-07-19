@@ -33,7 +33,7 @@ class ImageCaptioningDataset(torch.utils.data.Dataset):
 
 
 def create_dataset(json_file):
-    image_folder = 'aux_data/raw_data'
+    image_folder = 'aux_data/raw_data/'
     # json_file = 'aux_data/raw_data/coco_karpathy_train_indo.json'
 
     # captions = json.loads(read_to_buffer(json_file))
