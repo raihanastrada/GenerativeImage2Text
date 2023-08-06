@@ -5,6 +5,7 @@ import torch
 from datasets import Dataset, Image
 from torch.utils.data import DataLoader
 from transformers import AutoProcessor, AutoModelForCausalLM
+from tqdm import tqdm
 
 from pprint import pformat
 import logging
@@ -73,26 +74,24 @@ def finetune_git(json_file, model_id, out):
     model.to(device)
 
     model.train()
+    loss = 0
 
     for epoch in range(3):
-        print("Epoch:", epoch)
-        for idx, batch in enumerate(train_dataloader):
-            input_ids = batch.pop("input_ids").to(device)
-            pixel_values = batch.pop("pixel_values").to(device)
-
-            outputs = model(input_ids=input_ids,
+        with tqdm(train_dataloader) as tepoch:
+            for idx, batch in enumerate(tepoch):
+                tepoch.set_description(f"Epoch {epoch}")
+                input_ids = batch.pop("input_ids").to(device)
+                pixel_values = batch.pop("pixel_values").to(device)
+                outputs = model(input_ids=input_ids,
                             pixel_values=pixel_values,
                             labels=input_ids)
+                loss = outputs.loss
 
-            loss = outputs.loss
-
-            # print("Loss:", loss.item())
-
-            loss.backward()
-
-            optimizer.step()
-            optimizer.zero_grad()
-        print("Loss:", loss.item())
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                
+                tepoch.set_postfix(loss=loss.item())
 
     # saving model
     model.save_pretrained(out)
