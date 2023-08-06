@@ -131,12 +131,13 @@ def get_image_transform(param):
     transforms = Compose(trans)
     return transforms
 
-def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
+def test_git_inference_single_tsv_2(image_tsv, model_name, question_tsv, out_tsv):
     param = {}
     if File.isfile(f'output/{model_name}/parameter.yaml'):
         param = load_from_yaml_file(f'output/{model_name}/parameter.yaml')
 
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+    tokenizer = BertTokenizer.from_pretrained(
+        'bert-base-uncased', do_lower_case=True)
     image_tsv = TSVFile(image_tsv)
     question_tsv = TSVFile(question_tsv) if question_tsv else None
 
@@ -144,8 +145,8 @@ def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
 
     # model
     model = get_git_model(tokenizer, param)
-    pretrained = f'output/{model_name}/snapshot/model.pt'
-    checkpoint = torch_load(pretrained)['model']
+    pretrained = f'aux_data/models/{model_name}/pytorch_model.pt'
+    checkpoint = torch_load(pretrained)# ['model']
     load_state_dict(model, checkpoint)
     model.eval()
 
@@ -156,6 +157,7 @@ def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
     max_text_len = 40
     rank = get_mpi_rank()
     world_size = get_mpi_size()
+
     def get_rank_specific_tsv(rank):
         return '{}.{}.{}.tsv'.format(out_tsv, rank, world_size)
     if world_size > 1:
@@ -170,7 +172,7 @@ def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
 
     if question_tsv:
         def gen_rows():
-            for i  in tqdm(range(curr_start, curr_end)):
+            for i in tqdm(range(curr_start, curr_end)):
                 image_key, image_col = image_tsv[i]
                 q_key, q_info = question_tsv[i]
                 assert image_key == q_key
@@ -194,12 +196,14 @@ def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
                             'image': img,
                             'prefix': torch.tensor(input_ids).unsqueeze(0).cuda(),
                         })
-                    answer = tokenizer.decode(result['predictions'][0].tolist(), skip_special_tokens=True)
-                    result = {'answer': answer, 'question_id': q['question_id']}
+                    answer = tokenizer.decode(
+                        result['predictions'][0].tolist(), skip_special_tokens=True)
+                    result = {'answer': answer,
+                              'question_id': q['question_id']}
                     yield json_dump(result),
     else:
         def gen_rows():
-            for i  in tqdm(range(curr_start, curr_end)):
+            for i in tqdm(range(curr_start, curr_end)):
                 key, col = image_tsv[i]
                 img = pilimg_from_base64(col)
                 img = transforms(img)
@@ -208,7 +212,106 @@ def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
                     result = model({
                         'image': img,
                     })
-                cap = tokenizer.decode(result['predictions'][0].tolist(), skip_special_tokens=True)
+                cap = tokenizer.decode(
+                    result['predictions'][0].tolist(), skip_special_tokens=True)
+                yield key, json_dump([{'caption': cap}])
+    tsv_writer(gen_rows(), curr_out_tsv)
+    if world_size > 1 and rank == 0:
+        all_sub_tsv = [get_rank_specific_tsv(i) for i in range(world_size)]
+        while True:
+            not_ready = [t for t in all_sub_tsv if not File.isfile(t)]
+            if len(not_ready) == 0:
+                break
+            else:
+                import time
+                logging.info('waiting {}'.format(','.join(not_ready)))
+                time.sleep(5)
+        from .tsv_io import concat_tsv_files
+        concat_tsv_files(all_sub_tsv, out_tsv)
+
+def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
+    param = {}
+    if File.isfile(f'output/{model_name}/parameter.yaml'):
+        param = load_from_yaml_file(f'output/{model_name}/parameter.yaml')
+
+    tokenizer = BertTokenizer.from_pretrained(
+        'bert-base-uncased', do_lower_case=True)
+    image_tsv = TSVFile(image_tsv)
+    question_tsv = TSVFile(question_tsv) if question_tsv else None
+
+    transforms = get_image_transform(param)
+
+    # model
+    model = get_git_model(tokenizer, param)
+    pretrained = f'output/{model_name}/snapshot/model.pt'
+    checkpoint = torch_load(pretrained)['model']
+    load_state_dict(model, checkpoint)
+    model.eval()
+
+    torch.cuda.set_device(get_mpi_local_rank())
+    model.cuda()
+
+    # prefix
+    max_text_len = 40
+    rank = get_mpi_rank()
+    world_size = get_mpi_size()
+
+    def get_rank_specific_tsv(rank):
+        return '{}.{}.{}.tsv'.format(out_tsv, rank, world_size)
+    if world_size > 1:
+        curr_out_tsv = get_rank_specific_tsv(rank)
+    else:
+        curr_out_tsv = out_tsv
+    total = len(image_tsv)
+    curr_size = (total + world_size - 1) // world_size
+    curr_start = curr_size * rank
+    curr_end = curr_start + curr_size
+    curr_end = min(curr_end, total)
+
+    if question_tsv:
+        def gen_rows():
+            for i in tqdm(range(curr_start, curr_end)):
+                image_key, image_col = image_tsv[i]
+                q_key, q_info = question_tsv[i]
+                assert image_key == q_key
+                q_info = json.loads(q_info)
+                img = pilimg_from_base64(image_col)
+                img = transforms(img)
+                img = img.cuda().unsqueeze(0)
+                for q in q_info:
+                    prefix = q['question']
+                    prefix_encoding = tokenizer(prefix,
+                                                padding='do_not_pad',
+                                                truncation=True,
+                                                add_special_tokens=False,
+                                                max_length=max_text_len)
+                    payload = prefix_encoding['input_ids']
+                    if len(payload) > max_text_len - 2:
+                        payload = payload[-(max_text_len - 2):]
+                    input_ids = [tokenizer.cls_token_id] + payload
+                    with torch.no_grad():
+                        result = model({
+                            'image': img,
+                            'prefix': torch.tensor(input_ids).unsqueeze(0).cuda(),
+                        })
+                    answer = tokenizer.decode(
+                        result['predictions'][0].tolist(), skip_special_tokens=True)
+                    result = {'answer': answer,
+                              'question_id': q['question_id']}
+                    yield json_dump(result),
+    else:
+        def gen_rows():
+            for i in tqdm(range(curr_start, curr_end)):
+                key, col = image_tsv[i]
+                img = pilimg_from_base64(col)
+                img = transforms(img)
+                img = img.cuda().unsqueeze(0)
+                with torch.no_grad():
+                    result = model({
+                        'image': img,
+                    })
+                cap = tokenizer.decode(
+                    result['predictions'][0].tolist(), skip_special_tokens=True)
                 yield key, json_dump([{'caption': cap}])
     tsv_writer(gen_rows(), curr_out_tsv)
     if world_size > 1 and rank == 0:
